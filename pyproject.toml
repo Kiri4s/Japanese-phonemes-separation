@@ -1,0 +1,12 @@
+[project]
+name = "japanese-phonemes-separation"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ipykernel>=7.1.0",
+    "jiwer>=4.0.0",
+    "pandas>=2.3.3",
+    "tqdm>=4.67.1",
+]
