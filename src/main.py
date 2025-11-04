@@ -1,10 +1,10 @@
 from typing import Set, List, Tuple, Dict, Optional
 from collections import defaultdict, Counter
 import math
-import random
 import pandas as pd
 from tqdm import tqdm
 from jiwer import wer
+from fire import Fire
 
 
 SMALL_KANA: Set[str] = set(list("ゃゅょぁぃぅぇぉャュョァィゥェォ"))
@@ -32,7 +32,6 @@ def tokenize_mora(kana: str) -> Tuple[List[str], Set[int]]:
     """
     kana = kana.strip()
     words = kana.split()
-    kana_chars = []
     mora_list = []
     word_boundaries = []  # indices in mora_list after which a word boundary exists
     idx = 0
@@ -63,40 +62,11 @@ def tokenize_mora(kana: str) -> Tuple[List[str], Set[int]]:
     return mora_list, set(word_boundaries)
 
 
-def initialize_uniform_probs(
-    mora_vocab: Set[str], 
-    phoneme_vocab: Optional[Set[str]], 
-    max_ph_len: int = 4
-) -> Dict[str, Dict[Tuple[str, ...], float]]:
-    """
-    Initializes uniform probability distribution for mora-to-phoneme mappings.
-
-    Args:
-        mora_vocab (set): Set of all possible moras
-        phoneme_vocab (set): Set of all phonemes (not used)
-        max_ph_len (int): Maximum length of phoneme sequence for a mora
-
-    Returns:
-        dict: Probability mapping mora -> {phoneme sequence -> probability}
-    """
-    # initialize uniformly for all observed pho_subsequences up to length max_ph_len
-    probs = defaultdict(lambda: defaultdict(float))  # mora -> (phoneseq tuple -> prob)
-    # initialize with small random noise
-    for m in mora_vocab:
-        for L in range(1, max_ph_len + 1):
-            probs[m][tuple(["<init_len=%d>" % L])] += 1.0
-            
-        tot = sum(probs[m].values())
-        for k in list(probs[m].keys()):
-            probs[m][k] = probs[m][k] / tot
-    return probs
-
-
 def viterbi_align(
-    moras: List[str], 
-    phonemes: List[str], 
-    probs: Dict[str, Dict[Tuple[str, ...], float]], 
-    max_ph_len: int = 6
+    moras: List[str],
+    phonemes: List[str],
+    probs: Dict[str, Dict[Tuple[str, ...], float]],
+    max_ph_len: int = 6,
 ) -> Optional[List[Tuple[str, ...]]]:
     """
     Finds optimal alignment between moras and phonemes using Viterbi algorithm.
@@ -131,7 +101,7 @@ def viterbi_align(
                 # get prob of m -> subseq
                 prob = probs.get(m, {}).get(subseq, None)
                 if prob is None:
-                    # backoff: if unseen, use small epsilon or combine with morphological heuristic
+                    # backoff: if unseen, use small epsilon
                     prob = 1e-8
                 logp = math.log(prob)
                 newp = base_logp + logp
@@ -154,10 +124,10 @@ def viterbi_align(
 
 
 def em_train(
-    pairs: List[Tuple[str, List[str]]], 
-    max_iters: int = 30, 
-    max_ph_len: int = 6, 
-    smoothing: float = 0.1
+    pairs: List[Tuple[str, List[str]]],
+    max_iters: int = 30,
+    max_ph_len: int = 6,
+    smoothing: float = 0.1,
 ) -> Dict[str, Dict[Tuple[str, ...], float]]:
     """
     Trains mora-to-phoneme alignment model using EM algorithm.
@@ -175,8 +145,8 @@ def em_train(
     for kana, _ in pairs:
         moras, _ = tokenize_mora(kana)
         mora_set.update(moras)
-    # initialize with uniform-ish probs
-    probs = initialize_uniform_probs(mora_set, None, max_ph_len=max_ph_len)
+
+    probs = defaultdict(lambda: defaultdict(float))
 
     # but better init: collect candidate subseqs from data with naive proportional split
     candidate_counts = defaultdict(Counter)
@@ -254,17 +224,17 @@ def em_train(
                 tv += abs(oldv - newv)
             max_change = max(max_change, tv)
             probs[m] = newd
-        
+
         if max_change < 1e-5:
             break
     return probs
 
 
 def segment_phonemes_by_kana(
-    kana_with_spaces: str, 
-    phonemes: List[str], 
-    probs: Dict[str, Dict[Tuple[str, ...], float]], 
-    max_ph_len: int = 6
+    kana_with_spaces: str,
+    phonemes: List[str],
+    probs: Dict[str, Dict[Tuple[str, ...], float]],
+    max_ph_len: int = 6,
 ) -> List[str]:
     """
     Segments phoneme sequence according to kana mora boundaries.
@@ -311,18 +281,21 @@ def segment_phonemes_by_kana(
 
 
 def main() -> None:
-    train = pd.read_csv("../dataset/test.csv")
-    test = pd.read_csv("../dataset/train.csv")
+    train = pd.read_csv("../dataset/train.csv")
+    test = pd.read_csv("../dataset/test.csv")
     trainpairs = [
         (i, j.split())
-        for i, j in zip(train["split_phrase"].tolist(), train["ipa"].tolist())
+        for i, j in zip(
+            train["split_phrase"].tolist() + test["split_phrase"].tolist(),
+            train["ipa"].tolist() + test["ipa"].tolist(),
+        )
     ]
     testpairs = [
         (i, j.split(), k.split())
         for i, j, k in zip(
-            test["split_phrase"].tolist(),
-            test["ipa"].tolist(),
-            test["split_ipa"].tolist(),
+            train["split_phrase"].tolist(),
+            train["ipa"].tolist(),
+            train["split_ipa"].tolist(),
         )
     ]
 
@@ -349,5 +322,39 @@ def main() -> None:
     print("accuracy on test set:", num_eq / num_all)
 
 
+def submission_gen(save2dir="../dataset") -> None:
+    train = pd.read_csv("../dataset/train.csv")
+    test = pd.read_csv("../dataset/test.csv")
+    trainpairs = [
+        (i, j.split())
+        for i, j in zip(
+            train["split_phrase"].tolist(),
+            train["ipa"].tolist(),
+        )
+    ]
+    testpairs = [
+        (i, j.split())
+        for i, j in zip(
+            test["split_phrase"].tolist(),
+            test["ipa"].tolist(),
+        )
+    ]
+
+    probs = em_train(trainpairs, max_iters=50, max_ph_len=4, smoothing=0.5)
+    segmented = []
+    for kana, phon in testpairs:
+        segmented.append(" ".join(segment_phonemes_by_kana(kana, phon, probs, max_ph_len=4)))
+    
+    ans = pd.DataFrame({'split_ipa': segmented})
+    ans.to_csv(save2dir+"/submission2.csv")
+
+
+def router(mode: str = "main", save2dir: str = "../dataset") -> None:
+    if mode == "main":
+        main()
+    elif mode == "submission":
+        submission_gen(save2dir=save2dir)
+
+
 if __name__ == "__main__":
-    main()
+    Fire(router)

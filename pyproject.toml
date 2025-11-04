@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "fire>=0.7.1",
     "ipykernel>=7.1.0",
     "jiwer>=4.0.0",
     "pandas>=2.3.3",
