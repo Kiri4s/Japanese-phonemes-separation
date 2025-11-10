@@ -33,7 +33,7 @@ def tokenize_mora(kana: str) -> Tuple[List[str], Set[int]]:
     kana = kana.strip()
     words = kana.split()
     mora_list = []
-    word_boundaries = []  # indices in mora_list after which a word boundary exists
+    word_boundaries = []
     idx = 0
     for w_i, w in enumerate(words):
         i = 0
@@ -58,7 +58,7 @@ def tokenize_mora(kana: str) -> Tuple[List[str], Set[int]]:
         idx += len(local_moras)
         # mark boundary after this word (unless last)
         if w_i != len(words) - 1:
-            word_boundaries.append(idx)  # boundary is after index idx-1 (0-based)
+            word_boundaries.append(idx)
     return mora_list, set(word_boundaries)
 
 
@@ -110,7 +110,7 @@ def viterbi_align(
     # check feasible end
     if dp[N][M][0] <= NEG_INF / 2:
         return None  # no feasible alignment
-    # backtrack
+    # alignment
     alignment = [None] * N
     p = M
     for i in range(N, 0, -1):
@@ -148,7 +148,7 @@ def em_train(
 
     probs = defaultdict(lambda: defaultdict(float))
 
-    # but better init: collect candidate subseqs from data with naive proportional split
+    # collect candidate subseqs from data with naive proportional split
     candidate_counts = defaultdict(Counter)
     for kana, phonemes in pairs:
         moras, _ = tokenize_mora(kana)
@@ -209,13 +209,11 @@ def em_train(
             newd = {}
             for subseq, c in cnts.items():
                 newd[subseq] = (c + smoothing) / denom
-            # also keep prior unseen short sequences with tiny prob
+
             # compute change
             old_map = probs.get(m, {})
-            # measure total variation distance roughly
             old_keys = set(old_map.keys())
             new_keys = set(newd.keys())
-            # include an epsilon for previously-known but now-absent
             tv = 0.0
             all_keys = old_keys.union(new_keys)
             for k in all_keys:
@@ -269,12 +267,9 @@ def segment_phonemes_by_kana(
     segmented = []
     p_pos = 0
     for i, block in enumerate(alignment):
-        # append phonemes in block
         for ph in block:
             segmented.append(ph)
         p_pos += len(block)
-        # if there was a word boundary after mora i, insert space token
-        # recall word_boundaries set holds mora indices after which boundary exists (1-based index count of moras)
         if (i + 1) in word_boundaries:
             segmented.append("<space>")
     return segmented
@@ -343,10 +338,13 @@ def submission_gen(save2dir="../dataset") -> None:
     probs = em_train(trainpairs, max_iters=50, max_ph_len=4, smoothing=0.5)
     segmented = []
     for kana, phon in testpairs:
-        segmented.append(" ".join(segment_phonemes_by_kana(kana, phon, probs, max_ph_len=4)))
-    
-    ans = pd.DataFrame({'split_ipa': segmented})
-    ans.to_csv(save2dir+"/submission2.csv")
+        segmented.append(
+            " ".join(segment_phonemes_by_kana(kana, phon, probs, max_ph_len=4))
+        )
+
+    ans = pd.DataFrame({"split_ipa": segmented})
+    ans.index.name = "id"
+    ans.to_csv(save2dir + "/submission2.csv")
 
 
 def router(mode: str = "main", save2dir: str = "../dataset") -> None:
